@@ -1,0 +1,71 @@
+import paho.mqtt.client as mqtt
+import time
+from twilio.rest import Client
+
+# MQTT Broker Info
+mqtt_server = "Your_MQTT_Broker_IP"
+mqtt_location_topic = "car/location"
+mqtt_speed_topic = "car/speed"
+location_interval = 120  # 2 minutes
+
+# Twilio credentials
+twilio_account_sid = "AC888f5878c9fe3039f0e1e24cb27dee86"
+twilio_auth_token = "91d14fa4c14dcd0f86f630185405c639"
+twilio_phone_number = "+13203453960"
+user_phone_number = "7399900012"
+
+# Initialize Twilio client
+twilio_client = Client(twilio_account_sid, twilio_auth_token)
+
+last_location_sent = 0
+current_location = None
+
+def on_connect(client, userdata, flags, rc):
+    print("Connected to MQTT Broker")
+    client.subscribe(mqtt_location_topic)
+    client.subscribe(mqtt_speed_topic)
+
+def on_message(client, userdata, msg):
+    global current_location, last_location_sent
+    if msg.topic == mqtt_location_topic:
+        current_location = msg.payload.decode()
+        print("Location received:", current_location)
+
+        # Send location SMS every 2 minutes
+        if time.time() - last_location_sent >= location_interval:
+            send_location_sms()
+            last_location_sent = time.time()
+
+    elif msg.topic == mqtt_speed_topic:
+        speed = msg.payload.decode()
+        print("Speed received:", speed)
+
+        # Send speed alert SMS if speed threshold exceeded
+        send_speed_sms(speed)
+
+def send_location_sms():
+    latitude, longitude = current_location.split(",")
+    google_maps_link = f"https://www.google.com/maps/?q={latitude},{longitude}"
+    message = f"Current Location: {google_maps_link}"
+    send_sms(message)
+
+def send_speed_sms(speed):
+    latitude, longitude = current_location.split(",")
+    google_maps_link = f"https://www.google.com/maps/?q={latitude},{longitude}"
+    message = f"Speed Alert! Current Speed: {speed}. Location: {google_maps_link}"
+    send_sms(message)
+
+def send_sms(message):
+    twilio_client.messages.create(
+        body=message,
+        from_=twilio_phone_number,
+        to=user_phone_number
+    )
+    print("SMS sent:", message)
+
+client = mqtt.Client()
+client.on_connect = on_connect
+client.on_message = on_message
+
+client.connect(mqtt_server, 1883, 60)
+client.loop_forever()
