@@ -1,0 +1,91 @@
+#include <WiFiNINA.h>
+#include <ArduinoMqttClient.h>
+#include <TinyGPS++.h>
+
+// Wi-Fi and MQTT broker information
+const char* ssid = "parth";                   // WiFi SSID
+const char* password = "1234567890";          // WiFi Password
+const char* mqttBroker = "192.168.43.186";    // MQTT Broker IP
+const int mqttPort = 1883;                    // MQTT Port
+const char* mqttTopicLocation = "car/location"; // Topic for GPS location
+const char* mqttTopicSpeed = "car/speed";       // Topic for speed data
+
+// GPS and speed threshold settings
+TinyGPSPlus gps;
+const float speedThreshold = 2.0;  // Speed threshold in km/h
+const unsigned long locationInterval = 10000; // 10 seconds in milliseconds
+unsigned long lastLocationSent = 0;
+
+WiFiClient wifiClient;
+MqttClient mqttClient(wifiClient);
+
+void setup() {
+  Serial.begin(9600);     // Start serial communication
+  Serial1.begin(9600);    // Start communication with GPS module
+
+  // Connect to WiFi and MQTT
+  connectToWiFi();
+  connectToMQTT();
+}
+
+void loop() {
+  mqttClient.poll();  // Maintain MQTT connection
+
+  // Read GPS data from Serial1 (connected to the GPS module)
+  while (Serial1.available() > 0) {
+    gps.encode(Serial1.read());
+
+    // Check if location data is updated
+    if (gps.location.isUpdated()) {
+      float latitude = gps.location.lat();
+      float longitude = gps.location.lng();
+      float speed_kph = gps.speed.kmph();  // Get speed in km/h
+
+      unsigned long currentMillis = millis();
+
+      // Send location every 10 seconds
+      if (currentMillis - lastLocationSent >= locationInterval) {
+        String locationPayload = String(latitude, 6) + "," + String(longitude, 6);
+        mqttClient.beginMessage(mqttTopicLocation);
+        mqttClient.print(locationPayload);
+        mqttClient.endMessage();
+
+        lastLocationSent = currentMillis;  // Update last sent time
+        Serial.print("Location sent: ");
+        Serial.println(locationPayload);
+      }
+
+      // Send speed data if it exceeds the threshold
+      if (speed_kph > speedThreshold) {
+        // Ensure the speed is greater than the threshold before sending the message
+        String speedPayload = String(speed_kph) + " km/h";
+        mqttClient.beginMessage(mqttTopicSpeed);
+        mqttClient.print(speedPayload);
+        mqttClient.endMessage();
+
+        Serial.print("Speed threshold exceeded: ");
+        Serial.println(speedPayload);
+      }
+    }
+  }
+}
+
+// Connect to WiFi
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.begin(ssid, password) != WL_CONNECTED) {
+    delay(1000);  // Retry every second
+    Serial.print(".");
+  }
+  Serial.println(" Connected to WiFi!");
+}
+
+// Connect to MQTT Broker
+void connectToMQTT() {
+  Serial.print("Connecting to MQTT...");
+  while (!mqttClient.connect(mqttBroker, mqttPort)) {
+    Serial.println("Attempting MQTT connection...");
+    delay(5000);  // Retry every 5 seconds if unable to connect
+  }
+  Serial.println(" Connected to MQTT!");
+}
